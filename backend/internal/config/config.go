@@ -8,7 +8,13 @@ type Config struct {
 	Port string
 	Env  string
 
+	// DB_DRIVER: "postgres" (default) or "sqlite"
+	DBDriver   string
 	DatabaseURL string
+	SQLitePath  string
+
+	// CACHE_DRIVER: "redis" (default) or "memory"
+	CacheDriver string
 	RedisURL    string
 
 	JWTAccessSecret  string
@@ -45,12 +51,19 @@ func Load() (*Config, error) {
 
 	viper.SetDefault("PORT", "8080")
 	viper.SetDefault("ENV", "development")
+	viper.SetDefault("DB_DRIVER", "postgres")
+	viper.SetDefault("CACHE_DRIVER", "redis")
+	viper.SetDefault("SQLITE_PATH", "./data/aiproxy.db")
 
 	return &Config{
 		Port: viper.GetString("PORT"),
 		Env:  viper.GetString("ENV"),
 
+		DBDriver:    viper.GetString("DB_DRIVER"),
 		DatabaseURL: viper.GetString("DATABASE_URL"),
+		SQLitePath:  viper.GetString("SQLITE_PATH"),
+
+		CacheDriver: viper.GetString("CACHE_DRIVER"),
 		RedisURL:    viper.GetString("REDIS_URL"),
 
 		JWTAccessSecret:  viper.GetString("JWT_ACCESS_SECRET"),

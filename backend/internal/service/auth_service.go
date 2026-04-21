@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/youorg/ai-proxy-platform/backend/internal/domain"
 	"github.com/youorg/ai-proxy-platform/backend/internal/repository"
 	"github.com/youorg/ai-proxy-platform/backend/pkg/crypto"
@@ -13,22 +12,20 @@ import (
 )
 
 var (
-	ErrEmailExists     = errors.New("email already registered")
+	ErrEmailExists        = errors.New("email already registered")
 	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrUserSuspended   = errors.New("account suspended")
+	ErrUserSuspended      = errors.New("account suspended")
 )
 
 type AuthService struct {
 	userRepo         repository.UserRepository
-	db               *pgxpool.Pool
 	jwtAccessSecret  string
 	jwtRefreshSecret string
 }
 
-func NewAuthService(userRepo repository.UserRepository, db *pgxpool.Pool, accessSecret, refreshSecret string) *AuthService {
+func NewAuthService(userRepo repository.UserRepository, accessSecret, refreshSecret string) *AuthService {
 	return &AuthService{
 		userRepo:         userRepo,
-		db:               db,
 		jwtAccessSecret:  accessSecret,
 		jwtRefreshSecret: refreshSecret,
 	}
@@ -41,7 +38,7 @@ type TokenPair struct {
 }
 
 func (s *AuthService) Register(ctx context.Context, email, password, displayName string) (*domain.User, error) {
-	exists, err := repository.ExistsEmail(ctx, s.db, email)
+	exists, err := s.userRepo.ExistsEmail(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +59,7 @@ func (s *AuthService) Register(ctx context.Context, email, password, displayName
 		Status:       "active",
 	}
 
-	if err := repository.CreateWithCreditAccount(ctx, s.db, u); err != nil {
+	if err := s.userRepo.CreateWithCreditAccount(ctx, u); err != nil {
 		return nil, err
 	}
 	return u, nil
@@ -89,7 +86,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*domai
 
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	tokenHash := crypto.SHA256Hex(refreshToken)
-	userID, err := repository.ValidateRefreshToken(ctx, s.db, tokenHash)
+	userID, err := s.userRepo.ValidateRefreshToken(ctx, tokenHash)
 	if err != nil {
 		return nil, err
 	}
@@ -102,8 +99,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 		return nil, ErrUserSuspended
 	}
 
-	// Rotate: revoke old token, issue new pair
-	if err := repository.RevokeRefreshToken(ctx, s.db, tokenHash); err != nil {
+	if err := s.userRepo.RevokeRefreshToken(ctx, tokenHash); err != nil {
 		return nil, err
 	}
 
@@ -112,7 +108,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 
 func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	tokenHash := crypto.SHA256Hex(refreshToken)
-	return repository.RevokeRefreshToken(ctx, s.db, tokenHash)
+	return s.userRepo.RevokeRefreshToken(ctx, tokenHash)
 }
 
 func (s *AuthService) issueTokens(ctx context.Context, u *domain.User) (*TokenPair, error) {
@@ -128,7 +124,7 @@ func (s *AuthService) issueTokens(ctx context.Context, u *domain.User) (*TokenPa
 
 	expiresAt := time.Now().Add(7 * 24 * time.Hour)
 	tokenHash := crypto.SHA256Hex(rawRefresh)
-	if err := repository.StoreRefreshToken(ctx, s.db, u.ID, tokenHash, expiresAt); err != nil {
+	if err := s.userRepo.StoreRefreshToken(ctx, u.ID, tokenHash, expiresAt); err != nil {
 		return nil, err
 	}
 

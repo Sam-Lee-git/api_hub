@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/youorg/ai-proxy-platform/backend/internal/domain"
 	"github.com/youorg/ai-proxy-platform/backend/internal/payment"
 	"github.com/youorg/ai-proxy-platform/backend/internal/repository"
@@ -15,7 +14,6 @@ import (
 type PaymentService struct {
 	paymentRepo repository.PaymentRepository
 	creditSvc   *CreditService
-	db          *pgxpool.Pool
 	alipay      *payment.AlipayClient
 	wechat      *payment.WechatClient
 }
@@ -23,14 +21,12 @@ type PaymentService struct {
 func NewPaymentService(
 	paymentRepo repository.PaymentRepository,
 	creditSvc *CreditService,
-	db *pgxpool.Pool,
 	alipay *payment.AlipayClient,
 	wechat *payment.WechatClient,
 ) *PaymentService {
 	return &PaymentService{
 		paymentRepo: paymentRepo,
 		creditSvc:   creditSvc,
-		db:          db,
 		alipay:      alipay,
 		wechat:      wechat,
 	}

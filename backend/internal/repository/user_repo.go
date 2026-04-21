@@ -105,6 +105,26 @@ func (r *pgUserRepository) List(ctx context.Context, limit, offset int) ([]*doma
 	return users, total, rows.Err()
 }
 
+func (r *pgUserRepository) ExistsEmail(ctx context.Context, email string) (bool, error) {
+	return ExistsEmail(ctx, r.db, email)
+}
+
+func (r *pgUserRepository) CreateWithCreditAccount(ctx context.Context, u *domain.User) error {
+	return CreateWithCreditAccount(ctx, r.db, u)
+}
+
+func (r *pgUserRepository) StoreRefreshToken(ctx context.Context, userID int64, tokenHash string, expiresAt time.Time) error {
+	return StoreRefreshToken(ctx, r.db, userID, tokenHash, expiresAt)
+}
+
+func (r *pgUserRepository) ValidateRefreshToken(ctx context.Context, tokenHash string) (int64, error) {
+	return ValidateRefreshToken(ctx, r.db, tokenHash)
+}
+
+func (r *pgUserRepository) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
+	return RevokeRefreshToken(ctx, r.db, tokenHash)
+}
+
 // CreateWithCreditAccount creates user + credit_account in a single transaction.
 func CreateWithCreditAccount(ctx context.Context, db *pgxpool.Pool, u *domain.User) error {
 	return pgx.BeginTxFunc(ctx, db, pgx.TxOptions{}, func(tx pgx.Tx) error {

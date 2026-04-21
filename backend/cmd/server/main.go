@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
 	"github.com/youorg/ai-proxy-platform/backend/internal/config"
 	"github.com/youorg/ai-proxy-platform/backend/internal/db"
+	"github.com/youorg/ai-proxy-platform/backend/internal/db/cache"
 	"github.com/youorg/ai-proxy-platform/backend/internal/domain"
 	"github.com/youorg/ai-proxy-platform/backend/internal/handler"
 	"github.com/youorg/ai-proxy-platform/backend/internal/middleware"
@@ -23,6 +23,7 @@ import (
 	"github.com/youorg/ai-proxy-platform/backend/internal/proxy"
 	"github.com/youorg/ai-proxy-platform/backend/internal/proxy/providers"
 	"github.com/youorg/ai-proxy-platform/backend/internal/repository"
+	sqliterepo "github.com/youorg/ai-proxy-platform/backend/internal/repository/sqlite"
 	"github.com/youorg/ai-proxy-platform/backend/internal/service"
 	"github.com/youorg/ai-proxy-platform/backend/pkg/crypto"
 )
@@ -43,28 +44,68 @@ func main() {
 
 	ctx := context.Background()
 
-	pgPool, err := db.NewPostgresPool(ctx, cfg.DatabaseURL)
-	if err != nil {
-		logger.Fatal("connect postgres", zap.Error(err))
+	// ---- Database ----
+	var (
+		userRepo     repository.UserRepository
+		apiKeyRepo   repository.APIKeyRepository
+		creditRepo   repository.CreditRepository
+		modelRepo    repository.ModelRepository
+		providerRepo repository.ProviderRepository
+		usageRepo    repository.UsageRepository
+		paymentRepo  repository.PaymentRepository
+	)
+
+	switch cfg.DBDriver {
+	case "sqlite":
+		logger.Info("using SQLite", zap.String("path", cfg.SQLitePath))
+		sqlDB, err := db.NewSQLiteDB(ctx, cfg.SQLitePath)
+		if err != nil {
+			logger.Fatal("connect sqlite", zap.Error(err))
+		}
+		if err := db.MigrateSQLite(sqlDB, cfg.SQLitePath); err != nil {
+			logger.Fatal("sqlite migration", zap.Error(err))
+		}
+		userRepo = sqliterepo.NewUserRepository(sqlDB)
+		apiKeyRepo = sqliterepo.NewAPIKeyRepository(sqlDB)
+		creditRepo = sqliterepo.NewCreditRepository(sqlDB)
+		modelRepo = sqliterepo.NewModelRepository(sqlDB)
+		providerRepo = sqliterepo.NewProviderRepository(sqlDB)
+		usageRepo = sqliterepo.NewUsageRepository(sqlDB)
+		paymentRepo = sqliterepo.NewPaymentRepository(sqlDB)
+
+	default: // "postgres"
+		logger.Info("using PostgreSQL")
+		pgPool, err := db.NewPostgresPool(ctx, cfg.DatabaseURL)
+		if err != nil {
+			logger.Fatal("connect postgres", zap.Error(err))
+		}
+		defer pgPool.Close()
+		userRepo = repository.NewUserRepository(pgPool)
+		apiKeyRepo = repository.NewAPIKeyRepository(pgPool)
+		creditRepo = repository.NewCreditRepository(pgPool)
+		modelRepo = repository.NewModelRepository(pgPool)
+		providerRepo = repository.NewProviderRepository(pgPool)
+		usageRepo = repository.NewUsageRepository(pgPool)
+		paymentRepo = repository.NewPaymentRepository(pgPool)
 	}
-	defer pgPool.Close()
 
-	rdb, err := db.NewRedisClient(ctx, cfg.RedisURL)
-	if err != nil {
-		logger.Fatal("connect redis", zap.Error(err))
+	// ---- Cache ----
+	var cacheClient cache.Client
+	switch cfg.CacheDriver {
+	case "memory":
+		logger.Info("using in-memory cache")
+		cacheClient = cache.NewMemoryCache()
+	default: // "redis"
+		logger.Info("using Redis cache")
+		rdb, err := db.NewRedisClient(ctx, cfg.RedisURL)
+		if err != nil {
+			logger.Fatal("connect redis", zap.Error(err))
+		}
+		defer rdb.Close()
+		cacheClient = cache.NewRedisCache(rdb)
 	}
-	defer rdb.Close()
 
-	// Repositories
-	userRepo := repository.NewUserRepository(pgPool)
-	apiKeyRepo := repository.NewAPIKeyRepository(pgPool)
-	creditRepo := repository.NewCreditRepository(pgPool)
-	modelRepo := repository.NewModelRepository(pgPool)
-	providerRepo := repository.NewProviderRepository(pgPool)
-	usageRepo := repository.NewUsageRepository(pgPool)
-	paymentRepo := repository.NewPaymentRepository(pgPool)
-
-	// Payment clients
+	// ---- Payment clients ----
 	alipayClient := payment.NewAlipayClient(
 		cfg.AlipayAppID, cfg.AlipayPrivateKey, cfg.AlipayPublicKey, cfg.AlipayNotifyURL,
 		cfg.Env != "production",
@@ -73,16 +114,15 @@ func main() {
 		cfg.WechatMchID, cfg.WechatAppID, cfg.WechatAPIV3Key, cfg.WechatCertSerial, cfg.WechatNotifyURL,
 	)
 
-	// Services
-	authSvc := service.NewAuthService(userRepo, pgPool, cfg.JWTAccessSecret, cfg.JWTRefreshSecret)
-	creditSvc := service.NewCreditService(creditRepo, rdb)
-	paymentSvc := service.NewPaymentService(paymentRepo, creditSvc, pgPool, alipayClient, wechatClient)
+	// ---- Services ----
+	authSvc := service.NewAuthService(userRepo, cfg.JWTAccessSecret, cfg.JWTRefreshSecret)
+	creditSvc := service.NewCreditService(creditRepo, cacheClient)
+	paymentSvc := service.NewPaymentService(paymentRepo, creditSvc, alipayClient, wechatClient)
 
-	// Proxy registry
+	// ---- Proxy registry ----
 	registry := proxy.NewRegistry()
 	registry.Register(providers.NewOpenAIProvider(
-		cfg.OpenAIAPIKey,
-		"https://api.openai.com/v1",
+		cfg.OpenAIAPIKey, "https://api.openai.com/v1",
 		[]string{"gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"},
 	))
 	if cfg.AnthropicAPIKey != "" {
@@ -99,13 +139,12 @@ func main() {
 	}
 	if cfg.AlibabaAPIKey != "" {
 		registry.Register(providers.NewOpenAIProvider(
-			cfg.AlibabaAPIKey,
-			"https://dashscope.aliyuncs.com/compatible-mode/v1",
+			cfg.AlibabaAPIKey, "https://dashscope.aliyuncs.com/compatible-mode/v1",
 			[]string{"qwen-max", "qwen-plus", "qwen-turbo"},
 		))
 	}
 
-	// Handlers
+	// ---- Handlers ----
 	proxyHandler := proxy.NewHandler(registry, modelRepo, usageRepo, apiKeyRepo, creditSvc, logger)
 	authHandler := handler.NewAuthHandler(authSvc)
 	userHandler := handler.NewUserHandler(userRepo, creditSvc, apiKeyRepo)
@@ -114,11 +153,11 @@ func main() {
 	webhookHandler := handler.NewPaymentWebhookHandler(paymentSvc)
 	adminHandler := handler.NewAdminHandler(userRepo, usageRepo, paymentRepo, modelRepo, providerRepo, creditSvc)
 
-	// Seed admin user and provider keys
-	seedAdmin(ctx, pgPool, userRepo, cfg, logger)
+	// ---- Seed ----
+	seedAdmin(ctx, userRepo, cfg, logger)
 	seedProviderKeys(ctx, providerRepo, cfg, logger)
 
-	// Router
+	// ---- Router ----
 	if cfg.Env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -176,9 +215,9 @@ func main() {
 	}
 
 	v1 := r.Group("/v1",
-		middleware.APIKeyAuth(apiKeyRepo, rdb),
+		middleware.APIKeyAuth(apiKeyRepo, cacheClient),
 		middleware.RequireCredits(creditSvc),
-		middleware.RateLimit(rdb, 60),
+		middleware.RateLimit(cacheClient, 60),
 	)
 	{
 		v1.POST("/chat/completions", proxyHandler.ChatCompletions)
@@ -226,7 +265,7 @@ func corsMiddleware() gin.HandlerFunc {
 	}
 }
 
-func seedAdmin(ctx context.Context, pgPool *pgxpool.Pool, userRepo repository.UserRepository, cfg *config.Config, logger *zap.Logger) {
+func seedAdmin(ctx context.Context, userRepo repository.UserRepository, cfg *config.Config, logger *zap.Logger) {
 	if cfg.AdminEmail == "" || cfg.AdminPassword == "" {
 		return
 	}
@@ -246,7 +285,7 @@ func seedAdmin(ctx context.Context, pgPool *pgxpool.Pool, userRepo repository.Us
 		Role:         "admin",
 		Status:       "active",
 	}
-	if err := repository.CreateWithCreditAccount(ctx, pgPool, u); err != nil {
+	if err := userRepo.CreateWithCreditAccount(ctx, u); err != nil {
 		logger.Warn("failed to seed admin user", zap.Error(err))
 		return
 	}

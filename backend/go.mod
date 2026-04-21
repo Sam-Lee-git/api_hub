@@ -14,4 +14,5 @@ require (
 	github.com/wechatpay-apiv3/wechatpay-go v0.2.20
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.37.0
+	modernc.org/sqlite v1.34.5
 )

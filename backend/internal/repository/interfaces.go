@@ -14,6 +14,12 @@ type UserRepository interface {
 	UpdateStatus(ctx context.Context, id int64, status string) error
 	UpdateProfile(ctx context.Context, id int64, displayName, passwordHash string) error
 	List(ctx context.Context, limit, offset int) ([]*domain.User, int64, error)
+	// Transaction helpers — implemented by both pgx and SQLite backends.
+	ExistsEmail(ctx context.Context, email string) (bool, error)
+	CreateWithCreditAccount(ctx context.Context, u *domain.User) error
+	StoreRefreshToken(ctx context.Context, userID int64, tokenHash string, expiresAt time.Time) error
+	ValidateRefreshToken(ctx context.Context, tokenHash string) (int64, error)
+	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 }
 
 type APIKeyRepository interface {
