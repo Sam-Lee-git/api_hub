@@ -26,7 +26,7 @@ step()  { echo -e "\n${BOLD}──── $* ────${NC}"; }
 REPO_URL="https://github.com/Sam-Lee-git/api_hub.git"
 INSTALL_DIR="/opt/ai-proxy"
 DATA_DIR="/opt/ai-proxy/data"
-GO_VERSION="1.22.4"
+GO_VERSION="1.23.4"
 NODE_VERSION="22"
 APP_USER="aiproxy"
 
@@ -127,6 +127,12 @@ fi
 # =============================================================================
 step "System packages"
 export DEBIAN_FRONTEND=noninteractive
+# Suppress needrestart interactive prompts ("Pending kernel upgrade" dialogs)
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+[[ -d /etc/needrestart/conf.d ]] && \
+  echo "\$nrconf{restart} = 'a'; \$nrconf{kernelhints} = 0;" \
+  > /etc/needrestart/conf.d/99-auto.conf
 apt-get update -qq
 for pkg in git curl wget build-essential openssl nginx certbot python3-certbot-nginx; do
   dpkg -s "$pkg" &>/dev/null || apt-get install -y -qq "$pkg"
