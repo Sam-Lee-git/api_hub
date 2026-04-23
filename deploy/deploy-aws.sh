@@ -176,6 +176,8 @@ REPO_DIR="$INSTALL_DIR/src"
 
 if [[ -d "$REPO_DIR/.git" ]]; then
   info "Pulling latest changes..."
+  # Allow root to operate on a repo owned by the app user
+  git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
   git -C "$REPO_DIR" pull --ff-only
   ok "Repository updated"
 else
