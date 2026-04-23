@@ -18,18 +18,21 @@ func NewCreditRepository(db *sql.DB) repository.CreditRepository {
 
 func (r *creditRepository) GetAccount(ctx context.Context, userID int64) (*domain.CreditAccount, error) {
 	a := &domain.CreditAccount{}
+	var updatedAt sqlTime
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, user_id, balance, total_spent, total_topped, updated_at
          FROM credit_accounts WHERE user_id = ?`, userID,
-	).Scan(&a.ID, &a.UserID, &a.Balance, &a.TotalSpent, &a.TotalTopped, &a.UpdatedAt)
+	).Scan(&a.ID, &a.UserID, &a.Balance, &a.TotalSpent, &a.TotalTopped, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	return a, err
+	if err != nil {
+		return nil, err
+	}
+	a.UpdatedAt = updatedAt.T
+	return a, nil
 }
 
-// DeductCredits atomically deducts credits. Allows micro-debt (balance can go negative).
-// SQLite WAL mode with a single writer makes explicit row-level locking unnecessary.
 func (r *creditRepository) DeductCredits(ctx context.Context, userID, amount int64, refID string) (int64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -110,10 +113,12 @@ func (r *creditRepository) ListTransactions(ctx context.Context, userID int64, l
 	var txs []*domain.CreditTransaction
 	for rows.Next() {
 		t := &domain.CreditTransaction{}
+		var createdAt sqlTime
 		if err := rows.Scan(&t.ID, &t.UserID, &t.Type, &t.Amount, &t.BalanceAfter,
-			&t.RefID, &t.Description, &t.CreatedAt); err != nil {
+			&t.RefID, &t.Description, &createdAt); err != nil {
 			return nil, 0, err
 		}
+		t.CreatedAt = createdAt.T
 		txs = append(txs, t)
 	}
 	return txs, total, rows.Err()

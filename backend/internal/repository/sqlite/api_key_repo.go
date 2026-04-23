@@ -32,16 +32,24 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *domain.APIKey) error
 
 func (r *apiKeyRepository) FindByHash(ctx context.Context, hash string) (*domain.APIKey, error) {
 	k := &domain.APIKey{}
+	var createdAt sqlTime
+	var lastUsedAt, expiresAt sqlNullTime
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, user_id, key_hash, key_prefix, name, status, last_used_at, expires_at, created_at
          FROM api_keys WHERE key_hash = ? AND deleted_at IS NULL`,
 		hash,
 	).Scan(&k.ID, &k.UserID, &k.KeyHash, &k.KeyPrefix, &k.Name, &k.Status,
-		&k.LastUsedAt, &k.ExpiresAt, &k.CreatedAt)
+		&lastUsedAt, &expiresAt, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	return k, err
+	if err != nil {
+		return nil, err
+	}
+	k.CreatedAt = createdAt.T
+	k.LastUsedAt = lastUsedAt.T
+	k.ExpiresAt = expiresAt.T
+	return k, nil
 }
 
 func (r *apiKeyRepository) ListByUser(ctx context.Context, userID int64) ([]*domain.APIKey, error) {
@@ -58,10 +66,14 @@ func (r *apiKeyRepository) ListByUser(ctx context.Context, userID int64) ([]*dom
 	var keys []*domain.APIKey
 	for rows.Next() {
 		k := &domain.APIKey{}
+		var createdAt sqlTime
+		var lastUsedAt sqlNullTime
 		if err := rows.Scan(&k.ID, &k.UserID, &k.KeyPrefix, &k.Name, &k.Status,
-			&k.LastUsedAt, &k.CreatedAt); err != nil {
+			&lastUsedAt, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan api key: %w", err)
 		}
+		k.CreatedAt = createdAt.T
+		k.LastUsedAt = lastUsedAt.T
 		keys = append(keys, k)
 	}
 	return keys, rows.Err()

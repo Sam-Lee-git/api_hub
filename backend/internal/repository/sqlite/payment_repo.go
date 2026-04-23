@@ -35,17 +35,26 @@ func (r *paymentRepository) CreateOrder(ctx context.Context, o *domain.PaymentOr
 
 func (r *paymentRepository) FindByOrderNo(ctx context.Context, orderNo string) (*domain.PaymentOrder, error) {
 	o := &domain.PaymentOrder{}
+	var createdAt, updatedAt, expiresAt sqlTime
+	var paidAt sqlNullTime
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, user_id, order_no, channel, amount_cny, credits_to_add, status,
                 provider_order_no, paid_at, expires_at, created_at, updated_at
          FROM payment_orders WHERE order_no = ?`,
 		orderNo,
 	).Scan(&o.ID, &o.UserID, &o.OrderNo, &o.Channel, &o.AmountCNY, &o.CreditsToAdd, &o.Status,
-		&o.ProviderOrderNo, &o.PaidAt, &o.ExpiresAt, &o.CreatedAt, &o.UpdatedAt)
+		&o.ProviderOrderNo, &paidAt, &expiresAt, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	return o, err
+	if err != nil {
+		return nil, err
+	}
+	o.CreatedAt = createdAt.T
+	o.UpdatedAt = updatedAt.T
+	o.ExpiresAt = expiresAt.T
+	o.PaidAt = paidAt.T
+	return o, nil
 }
 
 func (r *paymentRepository) MarkPaid(ctx context.Context, orderNo, providerOrderNo string) error {
@@ -114,11 +123,13 @@ func (r *paymentRepository) ListPackages(ctx context.Context) ([]*domain.CreditP
 	for rows.Next() {
 		p := &domain.CreditPackage{}
 		var isActive int
+		var createdAt sqlTime
 		if err := rows.Scan(&p.ID, &p.Name, &p.AmountCNY, &p.Credits, &p.BonusCredits,
-			&isActive, &p.DisplayOrder, &p.CreatedAt); err != nil {
+			&isActive, &p.DisplayOrder, &createdAt); err != nil {
 			return nil, err
 		}
 		p.IsActive = isActive != 0
+		p.CreatedAt = createdAt.T
 		pkgs = append(pkgs, p)
 	}
 	return pkgs, rows.Err()
@@ -127,11 +138,12 @@ func (r *paymentRepository) ListPackages(ctx context.Context) ([]*domain.CreditP
 func (r *paymentRepository) FindPackageByID(ctx context.Context, id int) (*domain.CreditPackage, error) {
 	p := &domain.CreditPackage{}
 	var isActive int
+	var createdAt sqlTime
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, name, amount_cny, credits, bonus_credits, is_active, display_order, created_at
          FROM credit_packages WHERE id = ? AND is_active = 1`, id,
 	).Scan(&p.ID, &p.Name, &p.AmountCNY, &p.Credits, &p.BonusCredits,
-		&isActive, &p.DisplayOrder, &p.CreatedAt)
+		&isActive, &p.DisplayOrder, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -139,6 +151,7 @@ func (r *paymentRepository) FindPackageByID(ctx context.Context, id int) (*domai
 		return nil, err
 	}
 	p.IsActive = isActive != 0
+	p.CreatedAt = createdAt.T
 	return p, nil
 }
 
@@ -146,10 +159,16 @@ func scanOrders(rows *sql.Rows) ([]*domain.PaymentOrder, error) {
 	var orders []*domain.PaymentOrder
 	for rows.Next() {
 		o := &domain.PaymentOrder{}
+		var createdAt, updatedAt, expiresAt sqlTime
+		var paidAt sqlNullTime
 		if err := rows.Scan(&o.ID, &o.UserID, &o.OrderNo, &o.Channel, &o.AmountCNY, &o.CreditsToAdd,
-			&o.Status, &o.ProviderOrderNo, &o.PaidAt, &o.ExpiresAt, &o.CreatedAt, &o.UpdatedAt); err != nil {
+			&o.Status, &o.ProviderOrderNo, &paidAt, &expiresAt, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan order: %w", err)
 		}
+		o.CreatedAt = createdAt.T
+		o.UpdatedAt = updatedAt.T
+		o.ExpiresAt = expiresAt.T
+		o.PaidAt = paidAt.T
 		orders = append(orders, o)
 	}
 	return orders, rows.Err()

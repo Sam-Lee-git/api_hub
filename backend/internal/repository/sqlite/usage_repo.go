@@ -131,11 +131,13 @@ func scanUsageRecords(rows *sql.Rows) ([]*domain.UsageRecord, error) {
 	var recs []*domain.UsageRecord
 	for rows.Next() {
 		r := &domain.UsageRecord{}
+		var createdAt sqlTime
 		if err := rows.Scan(&r.ID, &r.UserID, &r.APIKeyID, &r.ModelID, &r.ModelName,
 			&r.RequestID, &r.InputTokens, &r.OutputTokens, &r.TotalTokens,
-			&r.CreditsCharged, &r.Status, &r.LatencyMs, &r.CreatedAt); err != nil {
+			&r.CreditsCharged, &r.Status, &r.LatencyMs, &createdAt); err != nil {
 			return nil, err
 		}
+		r.CreatedAt = createdAt.T
 		recs = append(recs, r)
 	}
 	return recs, rows.Err()

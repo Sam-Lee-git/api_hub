@@ -26,9 +26,13 @@ func (r *providerRepository) List(ctx context.Context) ([]*domain.Provider, erro
 	var providers []*domain.Provider
 	for rows.Next() {
 		p := &domain.Provider{}
-		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKey, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var createdAt, updatedAt sqlTime
+		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKey, &p.Status,
+			&createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
+		p.CreatedAt = createdAt.T
+		p.UpdatedAt = updatedAt.T
 		providers = append(providers, p)
 	}
 	return providers, rows.Err()
@@ -36,14 +40,20 @@ func (r *providerRepository) List(ctx context.Context) ([]*domain.Provider, erro
 
 func (r *providerRepository) FindByName(ctx context.Context, name string) (*domain.Provider, error) {
 	p := &domain.Provider{}
+	var createdAt, updatedAt sqlTime
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, name, base_url, api_key, status, created_at, updated_at FROM providers WHERE name = ?`,
 		name,
-	).Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKey, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKey, &p.Status, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	return p, err
+	if err != nil {
+		return nil, err
+	}
+	p.CreatedAt = createdAt.T
+	p.UpdatedAt = updatedAt.T
+	return p, nil
 }
 
 func (r *providerRepository) Update(ctx context.Context, p *domain.Provider) error {

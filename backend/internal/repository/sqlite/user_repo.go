@@ -37,30 +37,46 @@ func (r *userRepository) Create(ctx context.Context, u *domain.User) error {
 
 func (r *userRepository) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
 	u := &domain.User{}
+	var createdAt, updatedAt sqlTime
+	var deletedAt sqlNullTime
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, email, password_hash, display_name, role, status, created_at, updated_at, deleted_at
          FROM users WHERE email = ? AND deleted_at IS NULL`,
 		email,
 	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.Role, &u.Status,
-		&u.CreatedAt, &u.UpdatedAt, &u.DeletedAt)
+		&createdAt, &updatedAt, &deletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	return u, err
+	if err != nil {
+		return nil, err
+	}
+	u.CreatedAt = createdAt.T
+	u.UpdatedAt = updatedAt.T
+	u.DeletedAt = deletedAt.T
+	return u, nil
 }
 
 func (r *userRepository) FindByID(ctx context.Context, id int64) (*domain.User, error) {
 	u := &domain.User{}
+	var createdAt, updatedAt sqlTime
+	var deletedAt sqlNullTime
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, email, password_hash, display_name, role, status, created_at, updated_at, deleted_at
          FROM users WHERE id = ? AND deleted_at IS NULL`,
 		id,
 	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.Role, &u.Status,
-		&u.CreatedAt, &u.UpdatedAt, &u.DeletedAt)
+		&createdAt, &updatedAt, &deletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	return u, err
+	if err != nil {
+		return nil, err
+	}
+	u.CreatedAt = createdAt.T
+	u.UpdatedAt = updatedAt.T
+	u.DeletedAt = deletedAt.T
+	return u, nil
 }
 
 func (r *userRepository) UpdateStatus(ctx context.Context, id int64, status string) error {
@@ -99,10 +115,13 @@ func (r *userRepository) List(ctx context.Context, limit, offset int) ([]*domain
 	var users []*domain.User
 	for rows.Next() {
 		u := &domain.User{}
+		var createdAt, updatedAt sqlTime
 		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.Status,
-			&u.CreatedAt, &u.UpdatedAt); err != nil {
+			&createdAt, &updatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan user: %w", err)
 		}
+		u.CreatedAt = createdAt.T
+		u.UpdatedAt = updatedAt.T
 		users = append(users, u)
 	}
 	return users, total, rows.Err()
@@ -155,10 +174,10 @@ func (r *userRepository) StoreRefreshToken(ctx context.Context, userID int64, to
 func (r *userRepository) ValidateRefreshToken(ctx context.Context, tokenHash string) (int64, error) {
 	var userID int64
 	var revoked int
-	var expiresAt string
+	var expiresAtStr string
 	err := r.db.QueryRowContext(ctx,
 		`SELECT user_id, revoked, expires_at FROM refresh_tokens WHERE token_hash = ?`, tokenHash,
-	).Scan(&userID, &revoked, &expiresAt)
+	).Scan(&userID, &revoked, &expiresAtStr)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, errors.New("token not found")
 	}
@@ -168,11 +187,11 @@ func (r *userRepository) ValidateRefreshToken(ctx context.Context, tokenHash str
 	if revoked != 0 {
 		return 0, errors.New("token revoked")
 	}
-	exp, err := time.Parse(time.RFC3339, expiresAt)
-	if err != nil {
+	var exp sqlTime
+	if err := exp.Scan(expiresAtStr); err != nil {
 		return 0, errors.New("invalid token expiry")
 	}
-	if time.Now().After(exp) {
+	if time.Now().After(exp.T) {
 		return 0, errors.New("token expired")
 	}
 	return userID, nil
