@@ -189,11 +189,32 @@ fi
 ln -sf "$INSTALL_DIR/.env" "$REPO_DIR/backend/.env"
 
 # =============================================================================
+# 5b. Swap — add 2 GB swap if total RAM < 2 GB (prevents OOM during Go build)
+# =============================================================================
+TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+if [[ $TOTAL_MEM_KB -lt 2000000 ]]; then
+  if [[ ! -f /swapfile ]]; then
+    info "Low memory detected ($(( TOTAL_MEM_KB / 1024 )) MB). Creating 2 GB swap file..."
+    fallocate -l 2G /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile >/dev/null
+    swapon /swapfile
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    ok "Swap enabled (2 GB)"
+  else
+    swapon /swapfile 2>/dev/null || true
+    ok "Swap already exists"
+  fi
+fi
+
+# =============================================================================
 # 6. Build backend
 # =============================================================================
 step "Build backend"
 cd "$REPO_DIR/backend"
+info "Downloading Go modules..."
 go mod tidy
+info "Compiling backend (SQLite takes 5-15 min on small instances — please wait)..."
 go build -ldflags="-s -w" -o "$INSTALL_DIR/backend" ./cmd/server/main.go
 ok "Backend binary built → $INSTALL_DIR/backend"
 
