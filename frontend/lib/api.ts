@@ -1,6 +1,8 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+// Empty default → relative URLs → Nginx routes /api/* and /v1/* to the backend.
+// Set NEXT_PUBLIC_API_URL only if the backend is on a different host.
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 const api = axios.create({
   baseURL: BASE_URL,
