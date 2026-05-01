@@ -72,6 +72,10 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "model not found in pricing table"})
 		return
 	}
+	if model.Status != "active" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model is not active: " + req.Model})
+		return
+	}
 
 	reqCtx := c.Request.Context()
 
@@ -106,13 +110,15 @@ func (h *Handler) handleComplete(
 	credits := model.CalculateCost(usage.InputTokens, usage.OutputTokens)
 	rec := &domain.UsageRecord{
 		UserID: userID, APIKeyID: apiKeyID, ModelID: model.ID,
-		RequestID:      requestID,
-		InputTokens:    usage.InputTokens,
-		OutputTokens:   usage.OutputTokens,
-		TotalTokens:    usage.InputTokens + usage.OutputTokens,
-		CreditsCharged: credits,
-		Status:         "success",
-		LatencyMs:      latencyMs,
+		RequestID:                  requestID,
+		InputTokens:                usage.InputTokens,
+		OutputTokens:               usage.OutputTokens,
+		TotalTokens:                usage.InputTokens + usage.OutputTokens,
+		InputCreditsPer1KSnapshot:  model.InputCreditsPer1K,
+		OutputCreditsPer1KSnapshot: model.OutputCreditsPer1K,
+		CreditsCharged:             credits,
+		Status:                     "success",
+		LatencyMs:                  latencyMs,
 	}
 
 	go h.saveUsage(context.Background(), rec, apiKeyID)
@@ -146,14 +152,16 @@ func (h *Handler) handleStream(
 
 	rec := &domain.UsageRecord{
 		UserID: userID, APIKeyID: apiKeyID, ModelID: model.ID,
-		RequestID:      requestID,
-		InputTokens:    usage.InputTokens,
-		OutputTokens:   usage.OutputTokens,
-		TotalTokens:    usage.InputTokens + usage.OutputTokens,
-		CreditsCharged: credits,
-		Status:         status,
-		ErrorMessage:   errMsg,
-		LatencyMs:      latencyMs,
+		RequestID:                  requestID,
+		InputTokens:                usage.InputTokens,
+		OutputTokens:               usage.OutputTokens,
+		TotalTokens:                usage.InputTokens + usage.OutputTokens,
+		InputCreditsPer1KSnapshot:  model.InputCreditsPer1K,
+		OutputCreditsPer1KSnapshot: model.OutputCreditsPer1K,
+		CreditsCharged:             credits,
+		Status:                     status,
+		ErrorMessage:               errMsg,
+		LatencyMs:                  latencyMs,
 	}
 
 	go h.saveUsage(context.Background(), rec, apiKeyID)

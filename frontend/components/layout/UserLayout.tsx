@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { isLoggedIn, getUser, clearAuth } from "@/lib/auth";
@@ -21,24 +21,34 @@ export default function UserLayout({ children }: { children: React.ReactNode }) 
   const [balance, setBalance] = useState<number | null>(null);
   const user = getUser();
 
-  useEffect(() => {
-    if (!isLoggedIn()) {
-      router.replace("/login");
-      return;
-    }
-    fetchBalance();
-    const interval = setInterval(fetchBalance, 30000);
-    return () => clearInterval(interval);
-  }, [router]);
-
-  const fetchBalance = async () => {
+  const fetchBalance = useCallback(async () => {
     try {
       const { data } = await api.get("/api/billing/balance");
       setBalance(data.balance);
     } catch {
       // ignore
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn()) {
+      router.replace("/login");
+      return;
+    }
+    let cancelled = false;
+    api.get("/api/billing/balance")
+      .then(({ data }) => {
+        if (!cancelled) setBalance(data.balance);
+      })
+      .catch(() => {
+        // ignore
+      });
+    const interval = setInterval(fetchBalance, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [fetchBalance, router]);
 
   const handleLogout = async () => {
     try {

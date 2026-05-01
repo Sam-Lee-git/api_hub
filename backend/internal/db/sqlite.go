@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -42,6 +43,7 @@ func MigrateSQLite(sdb *sql.DB, _ string) error {
 		"001_initial_schema.sql",
 		"002_model_pricing.sql",
 		"003_payment_tables.sql",
+		"004_usage_pricing_snapshot.sql",
 	}
 
 	for _, f := range files {
@@ -49,8 +51,31 @@ func MigrateSQLite(sdb *sql.DB, _ string) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", f, err)
 		}
-		if _, err := sdb.Exec(string(data)); err != nil {
+		if err := execSQLiteMigration(sdb, f, string(data)); err != nil {
 			return fmt.Errorf("apply migration %s: %w", f, err)
+		}
+	}
+	return nil
+}
+
+func execSQLiteMigration(sdb *sql.DB, filename, sqlText string) error {
+	if filename != "004_usage_pricing_snapshot.sql" {
+		_, err := sdb.Exec(sqlText)
+		return err
+	}
+
+	// SQLite has no ADD COLUMN IF NOT EXISTS. Keep the startup migration
+	// idempotent for existing local databases that already have these columns.
+	for _, stmt := range strings.Split(sqlText, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if _, err := sdb.Exec(stmt); err != nil {
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
+			return err
 		}
 	}
 	return nil

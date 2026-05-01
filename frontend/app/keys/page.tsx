@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import UserLayout from "@/components/layout/UserLayout";
 import api from "@/lib/api";
 import { toast } from "sonner";
@@ -23,17 +23,27 @@ export default function KeysPage() {
   const [newKey, setNewKey] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
 
-  const loadKeys = async () => {
+  const loadKeys = useCallback(async () => {
     try {
       const { data } = await api.get("/api/keys");
       setKeys(data.data || []);
     } catch {
       toast.error("获取 API Keys 失败");
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadKeys();
+    let cancelled = false;
+    api.get("/api/keys")
+      .then(({ data }) => {
+        if (!cancelled) setKeys(data.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("获取 API Keys 失败");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleCreate = async () => {

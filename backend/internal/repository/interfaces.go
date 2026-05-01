@@ -45,11 +45,11 @@ type UsageFilters struct {
 }
 
 type UsageSummary struct {
-	TotalCalls     int64
-	TotalTokens    int64
-	TotalCredits   int64
-	ByDay          []DaySummary
-	ByModel        []ModelSummary
+	TotalCalls   int64
+	TotalTokens  int64
+	TotalCredits int64
+	ByDay        []DaySummary
+	ByModel      []ModelSummary
 }
 
 type DaySummary struct {
@@ -95,6 +95,7 @@ type PaymentRepository interface {
 	CreateOrder(ctx context.Context, o *domain.PaymentOrder) error
 	FindByOrderNo(ctx context.Context, orderNo string) (*domain.PaymentOrder, error)
 	MarkPaid(ctx context.Context, orderNo, providerOrderNo string) error
+	FulfillPaidOrder(ctx context.Context, orderNo, providerOrderNo string) (*domain.PaymentOrder, bool, error)
 	ListByUser(ctx context.Context, userID int64, limit, offset int) ([]*domain.PaymentOrder, int64, error)
 	ListAll(ctx context.Context, limit, offset int) ([]*domain.PaymentOrder, int64, error)
 	ListPackages(ctx context.Context) ([]*domain.CreditPackage, error)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import UserLayout from "@/components/layout/UserLayout";
 import api from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +15,7 @@ export default function UsagePage() {
   const [filters, setFilters] = useState({ from: "", to: "", model: "" });
   const limit = 20;
 
-  const loadUsage = async () => {
+  const loadUsage = useCallback(async () => {
     try {
       const params = new URLSearchParams({
         limit: String(limit),
@@ -30,11 +30,30 @@ export default function UsagePage() {
     } catch {
       // ignore
     }
-  };
+  }, [filters.from, filters.model, filters.to, page]);
 
   useEffect(() => {
-    loadUsage();
-  }, [page]);
+    let cancelled = false;
+    const params = new URLSearchParams({
+      limit: String(limit),
+      page: String(page),
+      ...(filters.from && { from: filters.from }),
+      ...(filters.to && { to: filters.to }),
+      ...(filters.model && { model: filters.model }),
+    });
+    api.get(`/api/usage?${params}`)
+      .then(({ data }) => {
+        if (cancelled) return;
+        setRecords(data.data || []);
+        setTotal(data.total || 0);
+      })
+      .catch(() => {
+        // ignore
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filters.from, filters.model, filters.to, page]);
 
   return (
     <UserLayout>

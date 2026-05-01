@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AdminLayout from "@/components/layout/AdminLayout";
 import api from "@/lib/api";
 import { toast } from "sonner";
@@ -15,12 +15,20 @@ export default function AdminModelsPage() {
   const [editing, setEditing] = useState<{ [id: number]: Partial<Model> }>({});
   const [saving, setSaving] = useState<number | null>(null);
 
-  const loadModels = async () => {
+  const loadModels = useCallback(async () => {
     const { data } = await api.get("/api/admin/models");
     setModels(data.data || []);
-  };
+  }, []);
 
-  useEffect(() => { loadModels(); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    api.get("/api/admin/models").then(({ data }) => {
+      if (!cancelled) setModels(data.data || []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleEdit = (model: Model, field: keyof Model, value: string | number) => {
     setEditing((prev) => ({

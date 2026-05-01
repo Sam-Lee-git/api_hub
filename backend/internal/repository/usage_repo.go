@@ -21,11 +21,13 @@ func (r *pgUsageRepository) Create(ctx context.Context, rec *domain.UsageRecord)
 	return r.db.QueryRow(ctx,
 		`INSERT INTO usage_records
          (user_id, api_key_id, model_id, request_id, input_tokens, output_tokens, total_tokens,
+          input_credits_per_1k_snapshot, output_credits_per_1k_snapshot,
           credits_charged, status, latency_ms, error_message)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          RETURNING id, created_at`,
 		rec.UserID, rec.APIKeyID, rec.ModelID, rec.RequestID,
 		rec.InputTokens, rec.OutputTokens, rec.TotalTokens,
+		rec.InputCreditsPer1KSnapshot, rec.OutputCreditsPer1KSnapshot,
 		rec.CreditsCharged, rec.Status, rec.LatencyMs, rec.ErrorMessage,
 	).Scan(&rec.ID, &rec.CreatedAt)
 }
@@ -125,7 +127,11 @@ func (r *pgUsageRepository) summarize(ctx context.Context, userID int64, from, t
 	return s, nil
 }
 
-func scanUsageRecords(rows interface{ Next() bool; Scan(...interface{}) error; Err() error }) ([]*domain.UsageRecord, error) {
+func scanUsageRecords(rows interface {
+	Next() bool
+	Scan(...interface{}) error
+	Err() error
+}) ([]*domain.UsageRecord, error) {
 	var recs []*domain.UsageRecord
 	for rows.Next() {
 		r := &domain.UsageRecord{}

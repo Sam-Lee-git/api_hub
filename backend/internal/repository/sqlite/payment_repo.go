@@ -37,13 +37,14 @@ func (r *paymentRepository) FindByOrderNo(ctx context.Context, orderNo string) (
 	o := &domain.PaymentOrder{}
 	var createdAt, updatedAt, expiresAt sqlTime
 	var paidAt sqlNullTime
+	var providerOrderNo sql.NullString
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, user_id, order_no, channel, amount_cny, credits_to_add, status,
                 provider_order_no, paid_at, expires_at, created_at, updated_at
          FROM payment_orders WHERE order_no = ?`,
 		orderNo,
 	).Scan(&o.ID, &o.UserID, &o.OrderNo, &o.Channel, &o.AmountCNY, &o.CreditsToAdd, &o.Status,
-		&o.ProviderOrderNo, &paidAt, &expiresAt, &createdAt, &updatedAt)
+		&providerOrderNo, &paidAt, &expiresAt, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -54,6 +55,9 @@ func (r *paymentRepository) FindByOrderNo(ctx context.Context, orderNo string) (
 	o.UpdatedAt = updatedAt.T
 	o.ExpiresAt = expiresAt.T
 	o.PaidAt = paidAt.T
+	if providerOrderNo.Valid {
+		o.ProviderOrderNo = providerOrderNo.String
+	}
 	return o, nil
 }
 
@@ -72,6 +76,86 @@ func (r *paymentRepository) MarkPaid(ctx context.Context, orderNo, providerOrder
 		return errors.New("order not found or already processed")
 	}
 	return nil
+}
+
+func (r *paymentRepository) FulfillPaidOrder(ctx context.Context, orderNo, providerOrderNo string) (*domain.PaymentOrder, bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback()
+
+	o := &domain.PaymentOrder{}
+	var createdAt, updatedAt, expiresAt sqlTime
+	var paidAt sqlNullTime
+	var providerOrderNoValue sql.NullString
+	err = tx.QueryRowContext(ctx,
+		`SELECT id, user_id, order_no, channel, amount_cny, credits_to_add, status,
+                provider_order_no, paid_at, expires_at, created_at, updated_at
+         FROM payment_orders WHERE order_no = ?`,
+		orderNo,
+	).Scan(&o.ID, &o.UserID, &o.OrderNo, &o.Channel, &o.AmountCNY, &o.CreditsToAdd, &o.Status,
+		&providerOrderNoValue, &paidAt, &expiresAt, &createdAt, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	o.CreatedAt = createdAt.T
+	o.UpdatedAt = updatedAt.T
+	o.ExpiresAt = expiresAt.T
+	o.PaidAt = paidAt.T
+	if providerOrderNoValue.Valid {
+		o.ProviderOrderNo = providerOrderNoValue.String
+	}
+
+	if o.Status != "pending" {
+		if err := tx.Commit(); err != nil {
+			return nil, false, err
+		}
+		return o, false, nil
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE payment_orders
+         SET status='paid', provider_order_no=?, paid_at=datetime('now'), updated_at=datetime('now')
+         WHERE id=?`,
+		providerOrderNo, o.ID,
+	); err != nil {
+		return nil, false, err
+	}
+
+	var currentBalance int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT balance FROM credit_accounts WHERE user_id = ?`,
+		o.UserID,
+	).Scan(&currentBalance); err != nil {
+		return nil, false, fmt.Errorf("lock credit account: %w", err)
+	}
+
+	newBalance := currentBalance + o.CreditsToAdd
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE credit_accounts SET balance = ?, total_topped = total_topped + ?, updated_at = datetime('now') WHERE user_id = ?`,
+		newBalance, o.CreditsToAdd, o.UserID,
+	); err != nil {
+		return nil, false, err
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO credit_transactions (user_id, type, amount, balance_after, ref_id, description)
+         VALUES (?, 'topup', ?, ?, ?, 'Credit top-up')`,
+		o.UserID, o.CreditsToAdd, newBalance, o.OrderNo,
+	); err != nil {
+		return nil, false, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	o.Status = "paid"
+	o.ProviderOrderNo = providerOrderNo
+	return o, true, nil
 }
 
 func (r *paymentRepository) ListByUser(ctx context.Context, userID int64, limit, offset int) ([]*domain.PaymentOrder, int64, error) {
@@ -161,14 +245,18 @@ func scanOrders(rows *sql.Rows) ([]*domain.PaymentOrder, error) {
 		o := &domain.PaymentOrder{}
 		var createdAt, updatedAt, expiresAt sqlTime
 		var paidAt sqlNullTime
+		var providerOrderNo sql.NullString
 		if err := rows.Scan(&o.ID, &o.UserID, &o.OrderNo, &o.Channel, &o.AmountCNY, &o.CreditsToAdd,
-			&o.Status, &o.ProviderOrderNo, &paidAt, &expiresAt, &createdAt, &updatedAt); err != nil {
+			&o.Status, &providerOrderNo, &paidAt, &expiresAt, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan order: %w", err)
 		}
 		o.CreatedAt = createdAt.T
 		o.UpdatedAt = updatedAt.T
 		o.ExpiresAt = expiresAt.T
 		o.PaidAt = paidAt.T
+		if providerOrderNo.Valid {
+			o.ProviderOrderNo = providerOrderNo.String
+		}
 		orders = append(orders, o)
 	}
 	return orders, rows.Err()

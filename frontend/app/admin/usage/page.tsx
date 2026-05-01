@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AdminLayout from "@/components/layout/AdminLayout";
 import api from "@/lib/api";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,7 @@ export default function AdminUsagePage() {
   const [filters, setFilters] = useState({ from: "", to: "", model: "" });
   const limit = 20;
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const params = new URLSearchParams({
       limit: String(limit),
       page: String(page),
@@ -26,9 +26,26 @@ export default function AdminUsagePage() {
     const { data } = await api.get(`/api/admin/usage?${params}`);
     setRecords(data.data || []);
     setTotal(data.total || 0);
-  };
+  }, [filters.from, filters.model, filters.to, page]);
 
-  useEffect(() => { load(); }, [page]);
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({
+      limit: String(limit),
+      page: String(page),
+      ...(filters.from && { from: filters.from }),
+      ...(filters.to && { to: filters.to }),
+      ...(filters.model && { model: filters.model }),
+    });
+    api.get(`/api/admin/usage?${params}`).then(({ data }) => {
+      if (cancelled) return;
+      setRecords(data.data || []);
+      setTotal(data.total || 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [filters.from, filters.model, filters.to, page]);
 
   return (
     <AdminLayout>

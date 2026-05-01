@@ -21,10 +21,12 @@ func (r *usageRepository) Create(ctx context.Context, rec *domain.UsageRecord) e
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO usage_records
          (user_id, api_key_id, model_id, request_id, input_tokens, output_tokens, total_tokens,
+          input_credits_per_1k_snapshot, output_credits_per_1k_snapshot,
           credits_charged, status, latency_ms, error_message)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		rec.UserID, rec.APIKeyID, rec.ModelID, rec.RequestID,
 		rec.InputTokens, rec.OutputTokens, rec.TotalTokens,
+		rec.InputCreditsPer1KSnapshot, rec.OutputCreditsPer1KSnapshot,
 		rec.CreditsCharged, rec.Status, rec.LatencyMs, rec.ErrorMessage,
 	)
 	if err != nil {

@@ -151,7 +151,7 @@ func main() {
 	billingHandler := handler.NewBillingHandler(creditSvc, paymentSvc, creditRepo, paymentRepo)
 	usageHandler := handler.NewUsageHandler(usageRepo)
 	webhookHandler := handler.NewPaymentWebhookHandler(paymentSvc)
-	adminHandler := handler.NewAdminHandler(userRepo, usageRepo, paymentRepo, modelRepo, providerRepo, creditSvc)
+	adminHandler := handler.NewAdminHandler(userRepo, usageRepo, paymentRepo, modelRepo, providerRepo, apiKeyRepo, creditSvc)
 
 	// ---- Seed ----
 	seedAdmin(ctx, userRepo, cfg, logger)
@@ -206,6 +206,7 @@ func main() {
 		admin.GET("/users", adminHandler.ListUsers)
 		admin.PUT("/users/:id/status", adminHandler.UpdateUserStatus)
 		admin.POST("/users/:id/credits", adminHandler.AdjustCredits)
+		admin.POST("/users/:id/keys", adminHandler.CreateUserAPIKey)
 		admin.GET("/usage", adminHandler.ListUsage)
 		admin.GET("/payments", adminHandler.ListPayments)
 		admin.GET("/models", adminHandler.ListModels)

@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AdminLayout from "@/components/layout/AdminLayout";
 import api from "@/lib/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { User } from "@/types/api";
 
@@ -22,15 +22,29 @@ export default function AdminUsersPage() {
   const [adjustUser, setAdjustUser] = useState<UserWithBalance | null>(null);
   const [adjustAmount, setAdjustAmount] = useState("");
   const [adjustDesc, setAdjustDesc] = useState("");
+  const [keyUser, setKeyUser] = useState<UserWithBalance | null>(null);
+  const [keyName, setKeyName] = useState("");
+  const [newKey, setNewKey] = useState<string | null>(null);
+  const [creatingKey, setCreatingKey] = useState(false);
   const limit = 20;
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     const { data } = await api.get(`/api/admin/users?limit=${limit}&page=${page}`);
     setUsers(data.data || []);
     setTotal(data.total || 0);
-  };
+  }, [page]);
 
-  useEffect(() => { loadUsers(); }, [page]);
+  useEffect(() => {
+    let cancelled = false;
+    api.get(`/api/admin/users?limit=${limit}&page=${page}`).then(({ data }) => {
+      if (cancelled) return;
+      setUsers(data.data || []);
+      setTotal(data.total || 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [page]);
 
   const handleStatusChange = async (user: UserWithBalance) => {
     const newStatus = user.status === "active" ? "suspended" : "active";
@@ -59,6 +73,35 @@ export default function AdminUsersPage() {
     } catch {
       toast.error("调整失败");
     }
+  };
+
+  const handleCreateKey = async () => {
+    if (!keyUser) return;
+    setCreatingKey(true);
+    try {
+      const { data } = await api.post(`/api/admin/users/${keyUser.id}/keys`, {
+        name: keyName || "Admin Created Key",
+      });
+      setNewKey(data.key);
+      setKeyName("");
+      toast.success("API Key 已创建");
+    } catch {
+      toast.error("创建 API Key 失败");
+    } finally {
+      setCreatingKey(false);
+    }
+  };
+
+  const closeKeyDialog = () => {
+    setKeyUser(null);
+    setKeyName("");
+    setNewKey(null);
+  };
+
+  const copyNewKey = () => {
+    if (!newKey) return;
+    navigator.clipboard.writeText(newKey);
+    toast.success("已复制到剪贴板");
   };
 
   return (
@@ -111,6 +154,13 @@ export default function AdminUsersPage() {
                             onClick={() => { setAdjustUser(user); setAdjustAmount(""); }}
                           >
                             调整Credits
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setKeyUser(user)}
+                          >
+                            创建Key
                           </Button>
                           <Button
                             size="sm"
@@ -171,6 +221,47 @@ export default function AdminUsersPage() {
               <Button onClick={handleAdjustCredits} className="flex-1">确认调整</Button>
               <Button variant="outline" onClick={() => setAdjustUser(null)} className="flex-1">取消</Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!keyUser} onOpenChange={(open) => { if (!open) closeKeyDialog(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>创建 API Key - {keyUser?.email}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {!newKey ? (
+              <>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Key 名称</label>
+                  <Input
+                    value={keyName}
+                    onChange={(e) => setKeyName(e.target.value)}
+                    placeholder="例如: Production Key"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={handleCreateKey} disabled={creatingKey} className="flex-1">
+                    {creatingKey ? "创建中..." : "确认创建"}
+                  </Button>
+                  <Button variant="outline" onClick={closeKeyDialog} className="flex-1">取消</Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-red-600 font-medium">
+                  请立即复制并妥善保存，此 Key 只显示一次。
+                </p>
+                <code className="block bg-gray-100 p-3 rounded text-sm font-mono break-all">
+                  {newKey}
+                </code>
+                <div className="flex gap-2">
+                  <Button onClick={copyNewKey} className="flex-1">复制 Key</Button>
+                  <Button variant="outline" onClick={closeKeyDialog} className="flex-1">关闭</Button>
+                </div>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

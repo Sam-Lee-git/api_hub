@@ -9,6 +9,7 @@ import (
 	"github.com/youorg/ai-proxy-platform/backend/internal/domain"
 	"github.com/youorg/ai-proxy-platform/backend/internal/repository"
 	"github.com/youorg/ai-proxy-platform/backend/internal/service"
+	"github.com/youorg/ai-proxy-platform/backend/pkg/crypto"
 )
 
 type AdminHandler struct {
@@ -17,6 +18,7 @@ type AdminHandler struct {
 	paymentRepo repository.PaymentRepository
 	modelRepo   repository.ModelRepository
 	provRepo    repository.ProviderRepository
+	keyRepo     repository.APIKeyRepository
 	creditSvc   *service.CreditService
 }
 
@@ -26,6 +28,7 @@ func NewAdminHandler(
 	paymentRepo repository.PaymentRepository,
 	modelRepo repository.ModelRepository,
 	provRepo repository.ProviderRepository,
+	keyRepo repository.APIKeyRepository,
 	creditSvc *service.CreditService,
 ) *AdminHandler {
 	return &AdminHandler{
@@ -34,6 +37,7 @@ func NewAdminHandler(
 		paymentRepo: paymentRepo,
 		modelRepo:   modelRepo,
 		provRepo:    provRepo,
+		keyRepo:     keyRepo,
 		creditSvc:   creditSvc,
 	}
 }
@@ -48,8 +52,8 @@ func (h *AdminHandler) Dashboard(c *gin.Context) {
 	monthStats, _ := h.usageRepo.GlobalStats(ctx, monthStart, now)
 
 	c.JSON(http.StatusOK, gin.H{
-		"today":  todayStats,
-		"month":  monthStats,
+		"today": todayStats,
+		"month": monthStats,
 	})
 }
 
@@ -123,6 +127,56 @@ func (h *AdminHandler) AdjustCredits(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "credits adjusted"})
 }
 
+func (h *AdminHandler) CreateUserAPIKey(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+
+	user, err := h.userRepo.FindByID(c.Request.Context(), id)
+	if err != nil || user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if req.Name == "" {
+		req.Name = "Admin Created Key"
+	}
+
+	rawKey, hash, prefix, err := crypto.GenerateAPIKey()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate key"})
+		return
+	}
+
+	apiKey := &domain.APIKey{
+		UserID:    id,
+		KeyHash:   hash,
+		KeyPrefix: prefix,
+		Name:      req.Name,
+		Status:    "active",
+	}
+	if err := h.keyRepo.Create(c.Request.Context(), apiKey); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create key"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"id":         apiKey.ID,
+		"user_id":    apiKey.UserID,
+		"name":       apiKey.Name,
+		"key":        rawKey,
+		"key_prefix": apiKey.KeyPrefix,
+		"status":     apiKey.Status,
+		"created_at": apiKey.CreatedAt,
+	})
+}
+
 func (h *AdminHandler) ListModels(c *gin.Context) {
 	models, err := h.modelRepo.List(c.Request.Context())
 	if err != nil {
@@ -146,10 +200,10 @@ func (h *AdminHandler) UpdateModel(c *gin.Context) {
 	}
 
 	var req struct {
-		DisplayName         string `json:"display_name"`
-		InputCreditsPer1K   *int64 `json:"input_credits_per_1k"`
-		OutputCreditsPer1K  *int64 `json:"output_credits_per_1k"`
-		Status              string `json:"status"`
+		DisplayName        string `json:"display_name"`
+		InputCreditsPer1K  *int64 `json:"input_credits_per_1k"`
+		OutputCreditsPer1K *int64 `json:"output_credits_per_1k"`
+		Status             string `json:"status"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

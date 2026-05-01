@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -29,15 +30,19 @@ func (r *pgPaymentRepository) CreateOrder(ctx context.Context, o *domain.Payment
 
 func (r *pgPaymentRepository) FindByOrderNo(ctx context.Context, orderNo string) (*domain.PaymentOrder, error) {
 	o := &domain.PaymentOrder{}
+	var providerOrderNo sql.NullString
 	err := r.db.QueryRow(ctx,
 		`SELECT id, user_id, order_no, channel, amount_cny, credits_to_add, status,
                 provider_order_no, paid_at, expires_at, created_at, updated_at
          FROM payment_orders WHERE order_no = $1`,
 		orderNo,
 	).Scan(&o.ID, &o.UserID, &o.OrderNo, &o.Channel, &o.AmountCNY, &o.CreditsToAdd, &o.Status,
-		&o.ProviderOrderNo, &o.PaidAt, &o.ExpiresAt, &o.CreatedAt, &o.UpdatedAt)
+		&providerOrderNo, &o.PaidAt, &o.ExpiresAt, &o.CreatedAt, &o.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
+	}
+	if providerOrderNo.Valid {
+		o.ProviderOrderNo = providerOrderNo.String
 	}
 	return o, err
 }
@@ -55,6 +60,76 @@ func (r *pgPaymentRepository) MarkPaid(ctx context.Context, orderNo, providerOrd
 		return errors.New("order not found or already processed")
 	}
 	return nil
+}
+
+func (r *pgPaymentRepository) FulfillPaidOrder(ctx context.Context, orderNo, providerOrderNo string) (*domain.PaymentOrder, bool, error) {
+	var order *domain.PaymentOrder
+	fulfilled := false
+
+	err := pgx.BeginTxFunc(ctx, r.db, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		o := &domain.PaymentOrder{}
+		var providerOrderNoValue sql.NullString
+		err := tx.QueryRow(ctx,
+			`SELECT id, user_id, order_no, channel, amount_cny, credits_to_add, status,
+                    provider_order_no, paid_at, expires_at, created_at, updated_at
+             FROM payment_orders WHERE order_no = $1 FOR UPDATE`,
+			orderNo,
+		).Scan(&o.ID, &o.UserID, &o.OrderNo, &o.Channel, &o.AmountCNY, &o.CreditsToAdd, &o.Status,
+			&providerOrderNoValue, &o.PaidAt, &o.ExpiresAt, &o.CreatedAt, &o.UpdatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			order = nil
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if providerOrderNoValue.Valid {
+			o.ProviderOrderNo = providerOrderNoValue.String
+		}
+		order = o
+
+		if o.Status != "pending" {
+			return nil
+		}
+
+		if _, err := tx.Exec(ctx,
+			`UPDATE payment_orders
+             SET status='paid', provider_order_no=$1, paid_at=NOW(), updated_at=NOW()
+             WHERE id=$2`,
+			providerOrderNo, o.ID); err != nil {
+			return err
+		}
+
+		var currentBalance int64
+		if err := tx.QueryRow(ctx,
+			`SELECT balance FROM credit_accounts WHERE user_id = $1 FOR UPDATE`,
+			o.UserID,
+		).Scan(&currentBalance); err != nil {
+			return fmt.Errorf("lock credit account: %w", err)
+		}
+
+		newBalance := currentBalance + o.CreditsToAdd
+		if _, err := tx.Exec(ctx,
+			`UPDATE credit_accounts SET balance = $1, total_topped = total_topped + $2, updated_at = NOW() WHERE user_id = $3`,
+			newBalance, o.CreditsToAdd, o.UserID,
+		); err != nil {
+			return err
+		}
+
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO credit_transactions (user_id, type, amount, balance_after, ref_id, description)
+             VALUES ($1, 'topup', $2, $3, $4, 'Credit top-up')`,
+			o.UserID, o.CreditsToAdd, newBalance, o.OrderNo,
+		); err != nil {
+			return err
+		}
+
+		fulfilled = true
+		o.Status = "paid"
+		o.ProviderOrderNo = providerOrderNo
+		return nil
+	})
+	return order, fulfilled, err
 }
 
 func (r *pgPaymentRepository) ListByUser(ctx context.Context, userID int64, limit, offset int) ([]*domain.PaymentOrder, int64, error) {
@@ -137,9 +212,13 @@ func scanOrders(rows interface {
 	var orders []*domain.PaymentOrder
 	for rows.Next() {
 		o := &domain.PaymentOrder{}
+		var providerOrderNo sql.NullString
 		if err := rows.Scan(&o.ID, &o.UserID, &o.OrderNo, &o.Channel, &o.AmountCNY, &o.CreditsToAdd,
-			&o.Status, &o.ProviderOrderNo, &o.PaidAt, &o.ExpiresAt, &o.CreatedAt, &o.UpdatedAt); err != nil {
+			&o.Status, &providerOrderNo, &o.PaidAt, &o.ExpiresAt, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan order: %w", err)
+		}
+		if providerOrderNo.Valid {
+			o.ProviderOrderNo = providerOrderNo.String
 		}
 		orders = append(orders, o)
 	}

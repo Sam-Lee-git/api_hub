@@ -88,3 +88,7 @@ func (s *CreditService) AdminAdjust(ctx context.Context, userID, amount int64, d
 func (s *CreditService) invalidateCache(ctx context.Context, userID int64) {
 	s.cache.Del(ctx, fmt.Sprintf("balance:%d", userID))
 }
+
+func (s *CreditService) InvalidateBalance(ctx context.Context, userID int64) {
+	s.invalidateCache(ctx, userID)
+}

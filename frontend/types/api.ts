@@ -73,6 +73,8 @@ export interface UsageRecord {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  input_credits_per_1k_snapshot: number;
+  output_credits_per_1k_snapshot: number;
   credits_charged: number;
   status: string;
   latency_ms: number;

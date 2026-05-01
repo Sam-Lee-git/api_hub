@@ -33,11 +33,11 @@ func NewPaymentService(
 }
 
 type OrderResult struct {
-	OrderNo     string
-	Channel     string
-	PaymentURL  string  // for Alipay
-	CodeURL     string  // for WeChat QR
-	ExpiresAt   time.Time
+	OrderNo    string
+	Channel    string
+	PaymentURL string // for Alipay
+	CodeURL    string // for WeChat QR
+	ExpiresAt  time.Time
 }
 
 func (s *PaymentService) CreateOrder(ctx context.Context, userID int64, packageID int, channel string) (*OrderResult, error) {
@@ -120,22 +120,17 @@ func (s *PaymentService) HandleWechatNotify(ctx context.Context, body []byte, he
 
 // fulfillOrder atomically marks the order paid and credits the user.
 func (s *PaymentService) fulfillOrder(ctx context.Context, orderNo, providerOrderNo string) error {
-	order, err := s.paymentRepo.FindByOrderNo(ctx, orderNo)
+	order, fulfilled, err := s.paymentRepo.FulfillPaidOrder(ctx, orderNo, providerOrderNo)
 	if err != nil {
 		return err
 	}
 	if order == nil {
 		return errors.New("order not found")
 	}
-	if order.Status != "pending" {
-		return nil // already processed (duplicate notification)
+	if fulfilled {
+		s.creditSvc.InvalidateBalance(ctx, order.UserID)
 	}
-
-	if err := s.paymentRepo.MarkPaid(ctx, orderNo, providerOrderNo); err != nil {
-		return err
-	}
-
-	return s.creditSvc.TopUp(ctx, order.UserID, order.CreditsToAdd, orderNo)
+	return nil
 }
 
 func (s *PaymentService) GetOrderStatus(ctx context.Context, orderNo string, userID int64) (*domain.PaymentOrder, error) {
