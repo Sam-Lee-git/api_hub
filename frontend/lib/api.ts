@@ -34,6 +34,17 @@ api.interceptors.response.use(
   (res) => res,
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+    const requestURL = originalRequest?.url || "";
+    const isAuthRequest =
+      requestURL.includes("/api/auth/login") ||
+      requestURL.includes("/api/auth/register") ||
+      requestURL.includes("/api/auth/refresh") ||
+      requestURL.includes("/api/auth/logout");
+
+    if (error.response?.status === 401 && isAuthRequest) {
+      localStorage.removeItem("access_token");
+      return Promise.reject(error);
+    }
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       if (isRefreshing) {

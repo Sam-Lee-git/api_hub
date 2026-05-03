@@ -73,8 +73,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// Store refresh token in httpOnly cookie
-	c.SetCookie("refresh_token", tokens.RefreshToken, 7*24*3600, "/", "", true, true)
+	// Store refresh token in httpOnly cookie. Use Secure only when the request
+	// is actually HTTPS so IP-only HTTP deployments can still refresh sessions.
+	c.SetCookie("refresh_token", tokens.RefreshToken, 7*24*3600, "/", "", isSecureRequest(c), true)
 
 	c.JSON(http.StatusOK, gin.H{
 		"access_token": tokens.AccessToken,
@@ -98,12 +99,12 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 
 	tokens, err := h.authSvc.Refresh(c.Request.Context(), refreshToken)
 	if err != nil {
-		c.SetCookie("refresh_token", "", -1, "/", "", true, true)
+		c.SetCookie("refresh_token", "", -1, "/", "", isSecureRequest(c), true)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.SetCookie("refresh_token", tokens.RefreshToken, 7*24*3600, "/", "", true, true)
+	c.SetCookie("refresh_token", tokens.RefreshToken, 7*24*3600, "/", "", isSecureRequest(c), true)
 	c.JSON(http.StatusOK, gin.H{
 		"access_token": tokens.AccessToken,
 		"expires_in":   tokens.ExpiresIn,
@@ -116,6 +117,10 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	if refreshToken != "" {
 		h.authSvc.Logout(c.Request.Context(), refreshToken)
 	}
-	c.SetCookie("refresh_token", "", -1, "/", "", true, true)
+	c.SetCookie("refresh_token", "", -1, "/", "", isSecureRequest(c), true)
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
+}
+
+func isSecureRequest(c *gin.Context) bool {
+	return c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
 }
