@@ -7,6 +7,7 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const api = axios.create({
   baseURL: BASE_URL,
   withCredentials: true, // send httpOnly refresh cookie
+  timeout: 30000,
 });
 
 // Attach access token from localStorage
